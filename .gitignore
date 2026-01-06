@@ -9,3 +9,5 @@ logs/
 data/chroma/
 data/raw/
 data/processed/
+.mlflow/
+.dvcignore
