@@ -1,0 +1,9 @@
+.env
+__pycache__/
+.pytest_cache/
+logs/
+.dvc/
+.dvcignore
+.venv
+.uv/
+data/chroma/
