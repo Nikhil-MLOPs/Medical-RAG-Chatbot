@@ -7,3 +7,5 @@ logs/
 .venv
 .uv/
 data/chroma/
+data/raw/
+data/processed/
