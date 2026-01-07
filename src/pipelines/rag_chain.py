@@ -97,3 +97,43 @@ def build_rag_answer(question: str, k: int = 4):
     except Exception as e:
         logger.error(f"RAG failure: {str(e)}")
         raise RAGError("RAG execution failed")
+    
+def stream_rag_answer(question: str, k: int = 4):
+    try:
+        retriever = get_retriever(k=k)
+
+        t1 = time.time()
+        docs = retriever.invoke(question)
+        retrieval_time = round(time.time() - t1, 3)
+
+        logger.info(f"[STREAM] Retrieved {len(docs)} docs in {retrieval_time}s")
+
+        context_text = ""
+        sources = []
+
+        for doc in docs:
+            page = doc.metadata.get("page", "unknown")
+            src = doc.metadata.get("source", "unknown")
+
+            sources.append({"source": src, "page": page})
+            context_text += f"\n\n[Page {page}] {doc.page_content}"
+
+        prompt = ChatPromptTemplate.from_template(RAG_PROMPT)
+        llm = get_llm()
+
+        chain = prompt | llm
+
+        # Streaming begins
+        t2 = time.time()
+        for chunk in chain.stream({"question": question, "context": context_text}):
+            yield chunk.content
+
+        generation_time = round(time.time() - t2, 3)
+        total = retrieval_time + generation_time
+
+        yield f"\n\n[SOURCES]: {sources}"
+        yield f"\n[TIMING]: retrieval={retrieval_time}s, llm={generation_time}s, total={total}s"
+
+    except Exception as e:
+        logger.error(f"Streaming RAG failed: {str(e)}")
+        yield "Streaming failed due to an internal error."
