@@ -9,4 +9,6 @@ logs/
 .dvc/
 data/processed/
 .mlflow/
+mlruns/
 .dvcignore
+batch_eval_results.json

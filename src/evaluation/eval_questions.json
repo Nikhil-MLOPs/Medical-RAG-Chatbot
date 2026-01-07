@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "question": "What is diabetes and how is it generally defined?"
+  },
+  {
+    "id": 2,
+    "question": "What are common symptoms of hypertension?"
+  },
+  {
+    "id": 3,
+    "question": "What are the primary risk factors of heart disease?"
+  },
+  {
+    "id": 4,
+    "question": "Explain asthma in simple medical terms."
+  },
+  {
+    "id": 5,
+    "question": "What causes cancer?"
+  }
+]
