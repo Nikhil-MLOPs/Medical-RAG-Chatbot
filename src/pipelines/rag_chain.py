@@ -137,3 +137,86 @@ def stream_rag_answer(question: str, k: int = 4):
     except Exception as e:
         logger.error(f"Streaming RAG failed: {str(e)}")
         yield "Streaming failed due to an internal error."
+
+CHAT_PROMPT = """
+You are a highly reliable and cautious Medical AI Assistant.
+
+You are in a conversation with a user.
+You must use:
+1) The conversation history
+2) The retrieved medical context
+
+Rules:
+- Use ONLY medically grounded information from the context.
+- DO NOT invent medical facts.
+- If answer is not present in context, say:
+  "I cannot answer this based on the provided medical reference."
+- Keep responses concise and medically clear.
+
+Conversation History:
+{history}
+
+User Question:
+{question}
+
+Medical Context:
+{context}
+
+Answer:
+"""
+
+def build_chat_answer(question: str, history: list, k: int = 4):
+    try:
+        retriever = get_retriever(k=k)
+
+        t1 = time.time()
+        docs = retriever.invoke(question)
+        retrieval_time = round(time.time() - t1, 3)
+
+        logger.info(f"[CHAT] Retrieved {len(docs)} docs in {retrieval_time}s")
+
+        context_text = ""
+        sources = []
+        previews = []
+
+        for doc in docs:
+            page = doc.metadata.get("page", "unknown")
+            src = doc.metadata.get("source", "unknown")
+
+            sources.append({"source": src, "page": page})
+            previews.append(doc.page_content[:250])
+            context_text += f"\n\n[Page {page}] {doc.page_content}"
+
+        history_text = ""
+        for turn in history:
+            history_text += f"\n{turn['role'].upper()}: {turn['message']}"
+
+        prompt = ChatPromptTemplate.from_template(CHAT_PROMPT)
+        llm = get_llm()
+
+        chain = prompt | llm
+
+        t2 = time.time()
+        response = chain.invoke({
+            "history": history_text,
+            "question": question,
+            "context": context_text
+        })
+
+        generation_time = round(time.time() - t2, 3)
+        total = retrieval_time + generation_time
+
+        return {
+            "answer": response.content,
+            "sources": sources,
+            "retrieval_preview": previews,
+            "timing": {
+                "retrieval_time": retrieval_time,
+                "generation_time": generation_time,
+                "total_time": round(total, 3)
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Chat RAG failed: {str(e)}")
+        raise RAGError("Chat mode RAG failed")
