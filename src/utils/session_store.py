@@ -17,9 +17,11 @@ class SessionStore:
             self.client = redis.Redis(
                 host=REDIS_HOST,
                 port=REDIS_PORT,
+                username="default",
                 password=REDIS_PASSWORD,
                 db=REDIS_DB,
-                decode_responses=True
+                decode_responses=True,
+                ssl=True
             )
 
             self.client.ping()
