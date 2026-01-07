@@ -18,3 +18,7 @@ dependencies = [
     "streamlit>=1.52.2",
     "uvicorn>=0.40.0",
 ]
+[tool.pytest.ini_options]
+testpaths = [
+  "tests"
+]
