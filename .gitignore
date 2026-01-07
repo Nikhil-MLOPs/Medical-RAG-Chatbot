@@ -6,7 +6,7 @@ logs/
 .dvcignore
 .venv
 .uv/
-data/chroma/
+data/chroma_db/
 data/raw/
 data/processed/
 .mlflow/
