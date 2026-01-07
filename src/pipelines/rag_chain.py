@@ -1,3 +1,4 @@
+import time
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -52,23 +53,22 @@ def build_rag_answer(question: str, k: int = 4):
     try:
         retriever = get_retriever(k=k)
 
-        logger.info("Running retrieval...")
+        t1 = time.time()
         docs = retriever.invoke(question)
+        retrieval_time = round(time.time() - t1, 3)
 
-        logger.info(f"Retrieved {len(docs)} documents")
+        logger.info(f"Retrieved {len(docs)} docs in {retrieval_time}s")
 
-        # Build context string
         context_text = ""
         sources = []
+        previews = []
 
         for doc in docs:
             page = doc.metadata.get("page", "unknown")
             src = doc.metadata.get("source", "unknown")
 
-            sources.append({
-                "source": src,
-                "page": page
-            })
+            sources.append({"source": src, "page": page})
+            previews.append(doc.page_content[:250])
 
             context_text += f"\n\n[Page {page}] {doc.page_content}"
 
@@ -77,14 +77,23 @@ def build_rag_answer(question: str, k: int = 4):
 
         chain = prompt | llm
 
-        logger.info("Invoking LLM with grounded context...")
-        answer = chain.invoke({
-            "question": question,
-            "context": context_text
-        })
+        t2 = time.time()
+        answer = chain.invoke({"question": question, "context": context_text})
+        generation_time = round(time.time() - t2, 3)
 
-        return answer.content, sources
+        total_time = retrieval_time + generation_time
+
+        return {
+            "answer": answer.content,
+            "sources": sources,
+            "retrieval_preview": previews,
+            "timing": {
+                "retrieval_time": retrieval_time,
+                "generation_time": generation_time,
+                "total_time": round(total_time, 3)
+            }
+        }
 
     except Exception as e:
-        logger.error(f"RAG chain failure: {str(e)}")
-        raise RAGError("Failed to run RAG pipeline")
+        logger.error(f"RAG failure: {str(e)}")
+        raise RAGError("RAG execution failed")

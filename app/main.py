@@ -26,24 +26,18 @@ def health_check():
     return {"status": "ok", "message": "Medical RAG API running"}
 
 
-@app.post("/ask", response_model=QueryResponse)
+@app.post("/ask")
 def ask_question(request: QueryRequest):
     try:
         logger.info(f"Incoming Question: {request.question}")
 
-        answer, sources = build_rag_answer(
+        result = build_rag_answer(
             question=request.question,
-            k=2
+            k=4
         )
 
-        return {
-            "answer": answer,
-            "sources": sources
-        }
+        return result
 
     except Exception as e:
-        logger.error(f"Error in /ask: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to generate medical answer"
-        )
+        logger.error(f"/ask failed: {str(e)}")
+        raise HTTPException(500, "Medical answer generation failed")
