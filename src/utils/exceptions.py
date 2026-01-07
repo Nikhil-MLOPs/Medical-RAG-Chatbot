@@ -16,3 +16,7 @@ class EmbeddingError(RAGBaseException):
 class RetrievalError(RAGBaseException):
     """Raised when retrieval pipeline fails"""
     pass
+
+class RAGError(Exception):
+    """Raised when the RAG chain fails."""
+    pass
