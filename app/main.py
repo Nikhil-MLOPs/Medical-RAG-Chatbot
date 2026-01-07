@@ -2,10 +2,14 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from src.pipelines.rag_chain import build_rag_answer
+from src.pipelines.rag_chain import build_chat_answer
 from src.utils.logger import logger
 
 from fastapi.responses import StreamingResponse
 from src.pipelines.rag_chain import stream_rag_answer
+
+from src.utils.session_store import SessionStore
+session_store = SessionStore()
 
 
 app = FastAPI(
@@ -16,6 +20,10 @@ app = FastAPI(
 
 
 class QueryRequest(BaseModel):
+    question: str
+
+class ChatRequest(BaseModel):
+    session_id: str
     question: str
 
 
@@ -59,3 +67,36 @@ def ask_stream(request: QueryRequest):
     except Exception as e:
         logger.error(f"/ask-stream failed: {str(e)}")
         raise HTTPException(500, "Streaming failed")
+    
+@app.post("/chat")
+def chat(request: ChatRequest):
+    try:
+        session_id = request.session_id
+
+        history = session_store.get_history(session_id)
+
+        logger.info(f"[CHAT] Session: {session_id}")
+        logger.info(f"[CHAT] Question: {request.question}")
+
+        result = build_chat_answer(
+            question=request.question,
+            history=history,
+            k=4
+        )
+
+        session_store.save_turn(
+            session_id=session_id,
+            user_message=request.question,
+            assistant_message=result["answer"]
+        )
+
+        return {
+            "answer": result["answer"],
+            "sources": result["sources"],
+            "history_length": len(history) + 2,
+            "timing": result["timing"]
+        }
+
+    except Exception as e:
+        logger.error(f"/chat failed: {str(e)}")
+        raise HTTPException(500, "Chat mode failed")
