@@ -1,10 +1,34 @@
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableParallel, RunnablePassthrough
 
 from src.pipelines.retrieval import get_retriever
 from src.utils.logger import logger
 from src.utils.exceptions import RAGError
+
+
+RAG_PROMPT = """
+You are a highly reliable and cautious Medical AI Assistant.
+Use ONLY the provided medical context to answer the question.
+
+If the answer is not clearly contained in the context,
+respond:
+
+"I cannot answer this based on the provided medical reference."
+
+Rules:
+- Do NOT guess.
+- Do NOT invent medical information.
+- Prefer short, precise medical explanations.
+- Include referenced page numbers in your explanation when possible.
+
+Question:
+{question}
+
+Medical Context:
+{context}
+
+Answer:
+"""
 
 
 def get_llm():
@@ -12,8 +36,8 @@ def get_llm():
         logger.info("Initializing Ollama LLM...")
 
         llm = ChatOllama(
-            model="mistral",   # can switch later
-            temperature=0.1   # low temp reduces hallucination
+            model="mistral",
+            temperature=0.1,
         )
 
         logger.info("LLM initialized successfully.")
@@ -24,46 +48,43 @@ def get_llm():
         raise RAGError("LLM initialization failed")
 
 
-RAG_PROMPT = """
-You are a highly reliable and cautious Medical AI Assistant.
-Use ONLY the provided context to answer the question.
-
-If the answer is not clearly present in the context, reply:
-"I cannot answer this based on the provided medical reference."
-
-Rules:
-- Do NOT guess
-- Do NOT fabricate medical facts
-- Cite the page number and source file whenever possible
-- Be concise but medically correct
-
-Question:
-{question}
-
-Context:
-{context}
-
-Answer:
-"""
-
-
-def build_rag_chain(k=5):
+def build_rag_answer(question: str, k: int = 4):
     try:
         retriever = get_retriever(k=k)
-        llm = get_llm()
+
+        logger.info("Running retrieval...")
+        docs = retriever.invoke(question)
+
+        logger.info(f"Retrieved {len(docs)} documents")
+
+        # Build context string
+        context_text = ""
+        sources = []
+
+        for doc in docs:
+            page = doc.metadata.get("page", "unknown")
+            src = doc.metadata.get("source", "unknown")
+
+            sources.append({
+                "source": src,
+                "page": page
+            })
+
+            context_text += f"\n\n[Page {page}] {doc.page_content}"
 
         prompt = ChatPromptTemplate.from_template(RAG_PROMPT)
+        llm = get_llm()
 
-        # Parallel data flow:
-        chain = (
-            {"context": retriever, "question": RunnablePassthrough()}
-            | prompt
-            | llm
-        )
+        chain = prompt | llm
 
-        logger.info("RAG pipeline constructed successfully")
-        return chain
+        logger.info("Invoking LLM with grounded context...")
+        answer = chain.invoke({
+            "question": question,
+            "context": context_text
+        })
+
+        return answer.content, sources
 
     except Exception as e:
-        logger.error(f"Failed to build RAG chain: {e}")
-        raise RAGError("RAG chain creation failed")
+        logger.error(f"RAG chain failure: {str(e)}")
+        raise RAGError("Failed to run RAG pipeline")
