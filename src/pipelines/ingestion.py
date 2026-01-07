@@ -32,6 +32,11 @@ def split_documents(documents):
 
         chunks = splitter.split_documents(documents)
 
+        # enrich metadata
+        for idx, chunk in enumerate(chunks):
+            chunk.metadata["chunk_id"] = idx
+            chunk.metadata["source"] = ingestion_config.PDF_PATH
+
         logger.info(f"Document chunking complete. Total chunks created: {len(chunks)}")
         return chunks
 
