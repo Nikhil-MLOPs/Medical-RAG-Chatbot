@@ -7,20 +7,10 @@ MLFLOW_EXPERIMENT_NAME = "Medical-RAG-Evaluation"
 
 
 def init_mlflow():
-    """
-    Initialize MLflow experiment.
-    Ensures experiment exists.
-    Sets tracking URI (local file storage for now).
-    """
-
     try:
-        tracking_uri = os.path.join(os.getcwd(), "mlruns")
-        mlflow.set_tracking_uri(f"file:{tracking_uri}")
-
+        mlflow.set_tracking_uri("sqlite:///mlflow.db")
         mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
-
-        logger.info(f"MLflow initialized. Tracking at: {tracking_uri}")
-
+        logger.info("MLflow initialized with SQLite backend.")
     except Exception as e:
         logger.error(f"Failed to initialize MLflow: {str(e)}")
         raise e

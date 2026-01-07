@@ -1,3 +1,4 @@
+import re
 import time
 import json
 import statistics
@@ -50,15 +51,29 @@ def evaluate_single_query(question: str, k: int = 4):
         end_run(status="FAILED")
         raise e
     
-def evaluate_batch(dataset_path="src/evaluation/eval_questions.json", k: int = 4):
-    from src.experiments.mlflow_manager import (
-        init_mlflow,
-        start_run,
-        end_run,
-        log_params,
-        log_metrics
-    )
+def compute_retrieval_quality(question: str, docs):
+    try:
+        question_words = re.findall(r"\b[a-zA-Z]{5,}\b", question.lower())
 
+        if not question_words:
+            return 0.0
+
+        doc_text = " ".join([d.page_content.lower() for d in docs])
+
+        matched = 0
+        for w in question_words:
+            if w in doc_text:
+                matched += 1
+
+        score = matched / len(question_words)
+        return round(score, 3)
+
+    except Exception as e:
+        logger.error(f"Retrieval quality evaluation failed: {str(e)}")
+        return 0.0    
+    
+def evaluate_batch(dataset_path="src/evaluation/eval_questions.json", k: int = 4):
+    
     init_mlflow()
     run = start_run(run_name="Batch-Evaluation")
 
