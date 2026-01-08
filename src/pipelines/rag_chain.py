@@ -32,29 +32,23 @@ Answer:
 """
 
 
-_llm_instance = None
+_llm = None
 
 
 def get_llm():
-    global _llm_instance
+    global _llm
 
-    if _llm_instance is not None:
-        return _llm_instance
+    if _llm is None:
+        logger.info("Initializing Ollama LLM (one-time)...")
 
-    try:
-        logger.info("Initializing Ollama LLM...")
-
-        _llm_instance = ChatOllama(
+        _llm = ChatOllama(
             model="mistral",
-            temperature=0.1,
+            temperature=0.1
         )
 
-        logger.info("LLM initialized successfully.")
-        return _llm_instance
+        logger.info("Ollama LLM initialized and cached")
 
-    except Exception as e:
-        logger.error(f"Failed to initialize LLM: {e}")
-        raise
+    return _llm
 
 
 def build_rag_answer(question: str, k: int = 4):
@@ -67,18 +61,29 @@ def build_rag_answer(question: str, k: int = 4):
 
         logger.info(f"Retrieved {len(docs)} docs in {retrieval_time}s")
 
+        # ---- CONTEXT CONTROL CONFIG ----
+        MAX_CONTEXT_CHARS = 4000        # hard upper bound sent to LLM
+        MAX_CHARS_PER_DOC = 1000        # cap per document
+
         context_text = ""
         sources = []
         previews = []
 
         for doc in docs:
+            # Stop if context is already large enough
+            if len(context_text) >= MAX_CONTEXT_CHARS:
+                break
+
             page = doc.metadata.get("page", "unknown")
             src = doc.metadata.get("source", "unknown")
 
             sources.append({"source": src, "page": page})
             previews.append(doc.page_content[:250])
 
-            context_text += f"\n\n[Page {page}] {doc.page_content}"
+            # Truncate document content safely
+            truncated_content = doc.page_content[:MAX_CHARS_PER_DOC]
+
+            context_text += f"\n\n[Page {page}] {truncated_content}"
 
         prompt = ChatPromptTemplate.from_template(RAG_PROMPT)
         llm = get_llm()
@@ -86,7 +91,12 @@ def build_rag_answer(question: str, k: int = 4):
         chain = prompt | llm
 
         t2 = time.time()
-        answer = chain.invoke({"question": question, "context": context_text})
+        answer = chain.invoke(
+            {
+                "question": question,
+                "context": context_text
+            }
+        )
         generation_time = round(time.time() - t2, 3)
 
         total_time = retrieval_time + generation_time
@@ -105,6 +115,7 @@ def build_rag_answer(question: str, k: int = 4):
     except Exception as e:
         logger.error(f"RAG failure: {str(e)}")
         raise RAGError("RAG execution failed")
+
     
 def stream_rag_answer(question: str, k: int = 4):
     try:
@@ -228,3 +239,70 @@ def build_chat_answer(question: str, history: list, k: int = 4):
     except Exception as e:
         logger.error(f"Chat RAG failed: {str(e)}")
         raise RAGError("Chat mode RAG failed")
+    
+def stream_chat_answer(question: str, history: list, k: int = 4):
+    """
+    Streaming conversational RAG.
+    Yields ONLY plain text + tagged metadata.
+    NEVER returns dict or JSON.
+    """
+
+    try:
+        retriever = get_retriever(k=k)
+
+        t1 = time.time()
+        docs = retriever.invoke(question)
+        retrieval_time = round(time.time() - t1, 3)
+
+        context_text = ""
+        sources = []
+
+        for doc in docs:
+            page = doc.metadata.get("page", "unknown")
+            src = doc.metadata.get("source", "unknown")
+
+            sources.append({"source": src, "page": page})
+            context_text += f"\n\n[Page {page}] {doc.page_content}"
+
+        prompt = ChatPromptTemplate.from_template(RAG_PROMPT)
+        llm = get_llm()
+
+        chain = prompt | llm
+
+        t2 = time.time()
+        for chunk in chain.stream(
+            {
+                "question": question,
+                "context": context_text,
+                "history": history,
+            }
+        ):
+            yield chunk.content
+
+        generation_time = round(time.time() - t2, 3)
+        total_time = retrieval_time + generation_time
+
+        # -----------------------------
+        # SOURCES (HUMAN READABLE)
+        # -----------------------------
+        yield "\n\n[SOURCES]\n"
+        seen = set()
+        for src in sources:
+            filename = src["source"].split("/")[-1]
+            page = src["page"]
+            key = (filename, page)
+            if key not in seen:
+                seen.add(key)
+                yield f"{filename}, Page {page}\n"
+
+        # -----------------------------
+        # TIMING (HUMAN READABLE)
+        # -----------------------------
+        yield "\n[TIMING]\n"
+        yield f"Retriever time: {round(retrieval_time, 2)} seconds\n"
+        yield f"LLM generation time: {round(generation_time, 2)} seconds\n"
+        yield f"Total response time: {round(total_time, 2)} seconds\n"
+
+    except Exception as e:
+        logger.error(f"stream_chat_answer failed: {e}")
+        yield "\n\n[ERROR] Chat streaming failed."

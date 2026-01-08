@@ -1,24 +1,24 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-
-from src.pipelines.rag_chain import build_rag_answer
-from src.pipelines.rag_chain import build_chat_answer
-from src.utils.logger import logger
-
 from fastapi.responses import StreamingResponse
-from src.pipelines.rag_chain import stream_rag_answer
-
 from contextlib import asynccontextmanager
+
+from src.utils.logger import logger
 from src.utils.session_store import SessionStore
+from src.pipelines.rag_chain import (
+    build_rag_answer,
+    stream_rag_answer,
+    stream_chat_answer,
+)
 
 # -----------------------------------
-# GLOBAL SESSION STORE (lazy init)
+# GLOBAL SESSION STORE
 # -----------------------------------
 session_store = None
 
 
 # -----------------------------------
-# LIFESPAN STARTUP SHUTDOWN HANDLER
+# LIFESPAN (STARTUP / SHUTDOWN)
 # -----------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down application...")
 
+
 # -----------------------------------
 # FASTAPI APP
 # -----------------------------------
@@ -42,7 +43,7 @@ app = FastAPI(
     lifespan=lifespan,
     title="Medical RAG Chatbot API",
     version="1.0.0",
-    description="Reliable medical chatbot backed by RAG, Ollama, Chroma"
+    description="Reliable medical chatbot backed by RAG, Ollama, Chroma",
 )
 
 
@@ -58,11 +59,6 @@ class ChatRequest(BaseModel):
     question: str
 
 
-class QueryResponse(BaseModel):
-    answer: str
-    sources: list
-
-
 # -----------------------------------
 # HEALTH
 # -----------------------------------
@@ -72,16 +68,16 @@ def health_check():
 
 
 # -----------------------------------
-# ASK
+# ASK (NON-STREAMING, JSON)
 # -----------------------------------
 @app.post("/ask")
 def ask_question(request: QueryRequest):
     try:
-        logger.info(f"Incoming Question: {request.question}")
+        logger.info(f"[ASK] Question: {request.question}")
 
         result = build_rag_answer(
             question=request.question,
-            k=4
+            k=4,
         )
 
         return result
@@ -92,18 +88,24 @@ def ask_question(request: QueryRequest):
 
 
 # -----------------------------------
-# ASK STREAM
+# ASK STREAM (TEXT ONLY)
 # -----------------------------------
 @app.post("/ask-stream")
 def ask_stream(request: QueryRequest):
     try:
-        logger.info(f"Streaming Question: {request.question}")
+        logger.info(f"[ASK-STREAM] Question: {request.question}")
 
         def event_generator():
-            for chunk in stream_rag_answer(request.question, k=4):
+            for chunk in stream_rag_answer(
+                question=request.question,
+                k=4,
+            ):
                 yield chunk
 
-        return StreamingResponse(event_generator(), media_type="text/plain")
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/plain",
+        )
 
     except Exception as e:
         logger.error(f"/ask-stream failed: {str(e)}")
@@ -111,41 +113,33 @@ def ask_stream(request: QueryRequest):
 
 
 # -----------------------------------
-# CHAT
+# CHAT (STREAMING ONLY — NO JSON EVER)
 # -----------------------------------
 @app.post("/chat")
 def chat(request: ChatRequest):
-    try:
-        if session_store is None:
-            raise HTTPException(500, "Session service not ready")
+    if session_store is None:
+        raise HTTPException(500, "Session service not ready")
 
-        session_id = request.session_id
-        history = session_store.get_history(session_id)
+    session_id = request.session_id
+    question = request.question
+    history = session_store.get_history(session_id)
 
-        logger.info(f"[CHAT] Session: {session_id}")
-        logger.info(f"[CHAT] Question: {request.question}")
+    logger.info(f"[CHAT] Session: {session_id}")
+    logger.info(f"[CHAT] Question: {question}")
 
-        result = build_chat_answer(
-            question=request.question,
-            history=history,
-            k=4
-        )
+    def event_generator():
+        try:
+            for chunk in stream_chat_answer(
+                question=question,
+                history=history,
+                k=4,
+            ):
+                yield chunk
+        except Exception as e:
+            logger.error(f"[CHAT STREAM ERROR]: {e}")
+            yield "\n\n[ERROR] Chat streaming failed."
 
-        session_store.save_turn(
-            session_id=session_id,
-            user_message=request.question,
-            assistant_message=result["answer"]
-        )
-
-        return {
-            "answer": result["answer"],
-            "sources": result["sources"],
-            "history_length": len(history) + 2,
-            "timing": result["timing"]
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"/chat failed: {str(e)}")
-        raise HTTPException(500, "Chat mode failed")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/plain",
+    )

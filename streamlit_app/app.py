@@ -1,11 +1,12 @@
-import requests
 import streamlit as st
+import requests
+import uuid
+import re
 
-# -------------------------------
+# -------------------------------------------------
 # CONFIG
-# -------------------------------
-FASTAPI_URL = "http://127.0.0.1:8000/ask"
-
+# -------------------------------------------------
+FASTAPI_CHAT_URL = "http://127.0.0.1:8000/chat"
 
 st.set_page_config(
     page_title="Medical RAG Chatbot",
@@ -14,62 +15,122 @@ st.set_page_config(
 )
 
 st.title("🩺 Medical RAG Chatbot")
-st.caption("Reliable Medical Assistant | Powered by RAG + Ollama + Chroma + FastAPI")
-
-
-# -------------------------------
-# INPUT
-# -------------------------------
-question = st.text_area(
-    "Ask any medical question based on our textbook:",
-    height=120,
-    placeholder="Example: What is diabetes and how is it defined?"
+st.caption(
+    "Medical answers grounded strictly in textbook references. "
+    "No assumptions. No hallucinations."
 )
 
-if st.button("Get Answer"):
-    if not question.strip():
-        st.warning("Please enter a question.")
-        st.stop()
+# -------------------------------------------------
+# SESSION STATE
+# -------------------------------------------------
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
-    with st.spinner("Contacting Medical Knowledge Base..."):
-        try:
-            response = requests.post(
-                FASTAPI_URL,
-                json={"question": question},
-                timeout=None
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# -------------------------------------------------
+# RENDER CHAT HISTORY
+# -------------------------------------------------
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+        if msg.get("sources"):
+            with st.expander("📚 Medical References"):
+                for src in msg["sources"]:
+                    st.markdown(
+                        f"- **Medical Textbook** — Page `{src['page']}`"
+                    )
+
+        if msg.get("timing"):
+            st.caption(
+                f"⏱ Retriever: {msg['timing']['retrieval']}s · "
+                f"LLM: {msg['timing']['llm']}s · "
+                f"Total: {msg['timing']['total']}s"
             )
 
-            if response.status_code != 200:
-                st.error("Server error. Please try again later.")
-                st.stop()
+# -------------------------------------------------
+# USER INPUT
+# -------------------------------------------------
+user_input = st.chat_input("Ask a medical question…")
 
-            data = response.json()
+if user_input:
+    # ---- USER MESSAGE ----
+    st.session_state.messages.append(
+        {"role": "user", "content": user_input}
+    )
+
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    # ---- ASSISTANT MESSAGE (STREAMING) ----
+    with st.chat_message("assistant"):
+        answer_placeholder = st.empty()
+
+        full_answer = ""
+        sources = []
+        timing = None
+
+        try:
+            with requests.post(
+                FASTAPI_CHAT_URL,
+                json={
+                    "session_id": st.session_state.session_id,
+                    "question": user_input
+                },
+                stream=True,
+                timeout=None
+            ) as response:
+
+                if response.status_code != 200:
+                    answer_placeholder.error(
+                        "Medical answer generation failed."
+                    )
+                else:
+                    for chunk in response.iter_content(chunk_size=1024):
+                        if not chunk:
+                            continue
+
+                        text = chunk.decode("utf-8")
+
+                        # ---- TIMING BLOCK ----
+                        if text.startswith("[TIMING]"):
+                            match = re.search(
+                                r"retrieval=(\d+\.?\d*)s, llm=(\d+\.?\d*)s, total=(\d+\.?\d*)s",
+                                text
+                            )
+                            if match:
+                                timing = {
+                                    "retrieval": match.group(1),
+                                    "llm": match.group(2),
+                                    "total": match.group(3)
+                                }
+                            continue
+
+                        # ---- SOURCES BLOCK ----
+                        if text.startswith("[SOURCES]"):
+                            try:
+                                sources = eval(
+                                    text.replace("[SOURCES]:", "").strip()
+                                )
+                            except Exception:
+                                sources = []
+                            continue
+
+                        # ---- STREAM ANSWER TEXT ----
+                        full_answer += text
+                        answer_placeholder.markdown(full_answer)
 
         except Exception as e:
-            st.error(f"Connection failed: {e}")
-            st.stop()
+            answer_placeholder.error(f"Connection failed: {e}")
 
-    # -------------------------------
-    # DISPLAY ANSWER
-    # -------------------------------
-    st.subheader("Answer")
-    st.write(data["answer"])
-
-    st.success("AI followed medical-safe RAG pipeline successfully")
-
-    # -------------------------------
-    # SOURCES
-    # -------------------------------
-    st.subheader("📚 References Used")
-    for src in data["sources"]:
-        st.write(f"- Source: `{src['source']}` | Page: `{src['page']}`")
-
-    # -------------------------------
-    # TIMING
-    # -------------------------------
-    st.subheader("⚙️ Performance")
-    timing = data["timing"]
-
-    st.write(f"Retrieval Time: `{timing['retrieval_time']}s`")
-    st.write(f"Generation Time: `{timing['generation_time']}s`")
-    st.write(f"Total Response Time: `{timing['total_time']}s`")
+    # ---- SAVE ASSISTANT MESSAGE ----
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": full_answer,
+            "sources": sources,
+            "timing": timing
+        }
+    )
