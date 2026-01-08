@@ -2243,6 +2243,7 @@ dependencies = [
     { name = "pypdf" },
     { name = "pytest" },
     { name = "redis" },
+    { name = "requests" },
     { name = "streamlit" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -2261,6 +2262,7 @@ requires-dist = [
     { name = "pypdf", specifier = ">=6.5.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "redis", specifier = ">=7.1.0" },
+    { name = "requests", specifier = ">=2.32.5" },
     { name = "streamlit", specifier = ">=1.52.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.40.0" },
 ]

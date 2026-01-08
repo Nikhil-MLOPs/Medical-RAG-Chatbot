@@ -8,19 +8,50 @@ from src.utils.logger import logger
 from fastapi.responses import StreamingResponse
 from src.pipelines.rag_chain import stream_rag_answer
 
+from contextlib import asynccontextmanager
 from src.utils.session_store import SessionStore
-session_store = SessionStore()
+
+# -----------------------------------
+# GLOBAL SESSION STORE (lazy init)
+# -----------------------------------
+session_store = None
 
 
+# -----------------------------------
+# LIFESPAN STARTUP SHUTDOWN HANDLER
+# -----------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global session_store
+    try:
+        logger.info("Starting application... Initializing Redis...")
+        session_store = SessionStore()
+        logger.info("Redis Session Store Ready")
+    except Exception as e:
+        logger.error(f"Redis initialization failed: {e}")
+        session_store = None
+
+    yield
+
+    logger.info("Shutting down application...")
+
+# -----------------------------------
+# FASTAPI APP
+# -----------------------------------
 app = FastAPI(
+    lifespan=lifespan,
     title="Medical RAG Chatbot API",
     version="1.0.0",
     description="Reliable medical chatbot backed by RAG, Ollama, Chroma"
 )
 
 
+# -----------------------------------
+# REQUEST MODELS
+# -----------------------------------
 class QueryRequest(BaseModel):
     question: str
+
 
 class ChatRequest(BaseModel):
     session_id: str
@@ -32,11 +63,17 @@ class QueryResponse(BaseModel):
     sources: list
 
 
+# -----------------------------------
+# HEALTH
+# -----------------------------------
 @app.get("/health")
 def health_check():
     return {"status": "ok", "message": "Medical RAG API running"}
 
 
+# -----------------------------------
+# ASK
+# -----------------------------------
 @app.post("/ask")
 def ask_question(request: QueryRequest):
     try:
@@ -52,7 +89,11 @@ def ask_question(request: QueryRequest):
     except Exception as e:
         logger.error(f"/ask failed: {str(e)}")
         raise HTTPException(500, "Medical answer generation failed")
-    
+
+
+# -----------------------------------
+# ASK STREAM
+# -----------------------------------
 @app.post("/ask-stream")
 def ask_stream(request: QueryRequest):
     try:
@@ -67,12 +108,18 @@ def ask_stream(request: QueryRequest):
     except Exception as e:
         logger.error(f"/ask-stream failed: {str(e)}")
         raise HTTPException(500, "Streaming failed")
-    
+
+
+# -----------------------------------
+# CHAT
+# -----------------------------------
 @app.post("/chat")
 def chat(request: ChatRequest):
     try:
-        session_id = request.session_id
+        if session_store is None:
+            raise HTTPException(500, "Session service not ready")
 
+        session_id = request.session_id
         history = session_store.get_history(session_id)
 
         logger.info(f"[CHAT] Session: {session_id}")
@@ -97,6 +144,8 @@ def chat(request: ChatRequest):
             "timing": result["timing"]
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"/chat failed: {str(e)}")
         raise HTTPException(500, "Chat mode failed")

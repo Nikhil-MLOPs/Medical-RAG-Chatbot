@@ -15,21 +15,23 @@ class SessionStore:
     def __init__(self):
         try:
             self.client = redis.Redis(
-                host=REDIS_HOST,
-                port=REDIS_PORT,
-                username="default",
-                password=REDIS_PASSWORD,
-                db=REDIS_DB,
-                decode_responses=True,
-                ssl=True
+                host=os.getenv("REDIS_HOST", "localhost"),
+                port=int(os.getenv("REDIS_PORT", 6379)),
+                password=os.getenv("REDIS_PASSWORD", None),
+
+                # CRITICAL PART
+                socket_connect_timeout=3,   # if Redis not reachable → fail fast
+                socket_timeout=3,
+                retry_on_timeout=False,
+                ssl=os.getenv("REDIS_SSL", "false").lower() == "true"
             )
 
             self.client.ping()
             logger.info("Connected to Redis successfully")
 
         except Exception as e:
-            logger.error(f"Redis connection failed: {str(e)}")
-            raise Exception("Failed to connect to Redis")
+            logger.error(f"Redis connection failed: {e}")
+            raise
 
     def _key(self, session_id):
         return f"medical_chat:{session_id}"

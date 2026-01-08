@@ -32,21 +32,29 @@ Answer:
 """
 
 
+_llm_instance = None
+
+
 def get_llm():
+    global _llm_instance
+
+    if _llm_instance is not None:
+        return _llm_instance
+
     try:
         logger.info("Initializing Ollama LLM...")
 
-        llm = ChatOllama(
+        _llm_instance = ChatOllama(
             model="mistral",
             temperature=0.1,
         )
 
         logger.info("LLM initialized successfully.")
-        return llm
+        return _llm_instance
 
     except Exception as e:
         logger.error(f"Failed to initialize LLM: {e}")
-        raise RAGError("LLM initialization failed")
+        raise
 
 
 def build_rag_answer(question: str, k: int = 4):
